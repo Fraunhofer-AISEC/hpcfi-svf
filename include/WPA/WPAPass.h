@@ -108,6 +108,11 @@ public:
         return "WPAPass";
     }
 
+    inline SVFG* getSVFG() const
+    {
+        return _svfg;
+    }
+
 private:
     /// Create pointer analysis according to specified kind and analyze the module.
     void runPointerAnalysis(SVFModule* svfModule, u32_t kind);

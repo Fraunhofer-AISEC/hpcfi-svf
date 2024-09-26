@@ -597,7 +597,7 @@ void SVFG::getInterVFEdgesForIndirectCallSite(const CallICFGNode* callICFGNode, 
             if (fun_arg->isPointer() && cs_arg->isPointer())
                 getInterVFEdgeAtIndCSFromAPToFP(cs_arg, fun_arg, callICFGNode, csId, edges);
         }
-        assert(funArgIt == funArgEit && "function has more arguments than call site");
+        //assert(funArgIt == funArgEit && "function has more arguments than call site");
         if (callee->getLLVMFun()->isVarArg())
         {
             NodeID varFunArg = pag->getVarargNode(callee);

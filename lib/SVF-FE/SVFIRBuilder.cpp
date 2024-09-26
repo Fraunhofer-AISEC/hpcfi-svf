@@ -232,6 +232,32 @@ u32_t SVFIRBuilder::inferFieldIdxFromByteOffset(const llvm::GEPOperator* gepOp, 
     return 0;
 }
 
+
+// find the bitcast following an allocation and returns the corresponding type
+Type *getStructTypeFromBitcast(const Value *V) {
+    for (const User *u : V->users()) {
+        if (const llvm::BitCastOperator* BC = SVFUtil::dyn_cast<llvm::BitCastOperator>(u)) {
+            if (PointerType *ptr_type = SVFUtil::dyn_cast<PointerType>(BC->getDestTy())) {
+                Type *deref_type = getPtrElementType(ptr_type);
+                if (SVFUtil::isa<StructType>(deref_type))
+                    return deref_type;
+            }
+        }
+        else if (const StoreInst *SI = SVFUtil::dyn_cast<StoreInst>(u)) {  // if src is i8*, dst may also get casted to i8*
+            if (const llvm::BitCastOperator* BC = SVFUtil::dyn_cast<llvm::BitCastOperator>(SI->getPointerOperand())) {
+                if (PointerType *ptr_type = SVFUtil::dyn_cast<PointerType>(BC->getSrcTy())) {
+                    if (PointerType *ptr_type2 = SVFUtil::dyn_cast<PointerType>(getPtrElementType(ptr_type))) {
+                        Type *deref_type = getPtrElementType(ptr_type2);
+                        if (SVFUtil::isa<StructType>(deref_type))
+                            return deref_type;
+                    }
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
 /*!
  * Return the object node offset according to GEP insn (V).
  * Given a gep edge p = q + i, if "i" is a constant then we return its offset size
@@ -240,6 +266,7 @@ u32_t SVFIRBuilder::inferFieldIdxFromByteOffset(const llvm::GEPOperator* gepOp, 
  */
 bool SVFIRBuilder::computeGepOffset(const User *V, LocationSet& ls)
 {
+    bool isConst = true;
     assert(V);
 
     const llvm::GEPOperator *gepOp = SVFUtil::dyn_cast<const llvm::GEPOperator>(V);
@@ -264,9 +291,14 @@ bool SVFIRBuilder::computeGepOffset(const User *V, LocationSet& ls)
         // but we can distinguish different field of an array of struct, e.g. s[1].f1 is differet from s[0].f2
         if(const ArrayType* arrTy = SVFUtil::dyn_cast<ArrayType>(gepTy))
         {
-            if(!op || (arrTy->getArrayNumElements() <= (u32_t)op->getSExtValue()))
+            if(!op || (arrTy->getArrayNumElements() <= (u32_t)op->getSExtValue())) {
+                if (Options::ModelArrays)
+                    isConst = false;
                 continue;
+            }
             s32_t idx = op->getSExtValue();
+
+            // use precise info for constant arrays
             u32_t offset = SymbolTableInfo::SymbolInfo()->getFlattenedElemIdx(arrTy, idx);
             ls.setFldIdx(ls.accumulateConstantFieldIdx() + offset);
         }
@@ -284,17 +316,41 @@ bool SVFIRBuilder::computeGepOffset(const User *V, LocationSet& ls)
             // If its point-to target is struct or array, it's likely an array accessing (%result = gep %struct.A* %a, i32 %non-const-index)
             // If its point-to target is single value (pointer arithmetic), then it's a variant gep (%result = gep i8* %p, i32 %non-const-index)
             if(!op && gepTy->isPointerTy() && getPtrElementType(SVFUtil::dyn_cast<PointerType>(gepTy))->isSingleValueType())
-                return false;
+                isConst = false;
+
+            if (!op)
+                continue;
 
             // The actual index
-            //s32_t idx = op->getSExtValue();
+            s32_t idx = op->getSExtValue();
 
-            // For pointer arithmetic we ignore the byte offset
-            // consider using inferFieldIdxFromByteOffset(geopOp,dataLayout,ls,idx)?
-            // ls.setFldIdx(ls.accumulateConstantFieldIdx() + inferFieldIdxFromByteOffset(geopOp,idx));
+            // handle GEPs such as the following: getelementptr %struct.StructA, %struct.StructA* %arrayinit.begin, i64 1
+            // byte offset GEPs are not handled here.
+            if (gepTy->isPointerTy()) { // should also work if arrays are not modeled
+                u32_t nr_fields = SymbolTableInfo::SymbolInfo()->getNumOfFlattenElements(gepTy->getPointerElementType());
+                ls.setFldIdx(ls.accumulateConstantFieldIdx() + idx * nr_fields);
+            }
+            
+
+            // if type is i8*, the type may be wrong. find correct type and infer the correct field
+            LLVMContext &cxt = LLVMModuleSet::getLLVMModuleSet()->getContext();
+            if (gepTy == PointerType::getInt8PtrTy(cxt)) {
+                if (Type *struct_type = getStructTypeFromBitcast(gepOp->getPointerOperand())) {
+                    std::vector<const Type*>& so = SymbolTableInfo::SymbolInfo()->getStructInfoIter(struct_type)->second->getFlattenElementTypes();
+                    int byte_offset = 0;
+                    for (unsigned int i = 0; i < so.size(); i++) {
+                        if (byte_offset == idx) {
+                            ls.setFldIdx(i);
+                            break;
+                        }
+                        int size = dataLayout->getTypeAllocSize(const_cast<Type*>(so[i])).getFixedSize();
+                        byte_offset += size + size % 8;
+                    }
+                }
+            }
         }
     }
-    return true;
+    return isConst;
 }
 
 /*!
@@ -680,9 +736,16 @@ void SVFIRBuilder::visitCastInst(CastInst &inst)
     DBOUT(DPAGBuild, outs() << "process cast  " << SVFUtil::value2String(&inst) << " \n");
     NodeID dst = getValueNode(&inst);
 
-    if (SVFUtil::isa<IntToPtrInst>(&inst))
+    if (IntToPtrInst *I2P = SVFUtil::dyn_cast<IntToPtrInst>(&inst))
     {
+        // always use blk for IntToPtr
+        bool handleBlk = Options::HandBlackHole;
+        if (PointerType *PT = SVFUtil::dyn_cast<PointerType>(I2P->getDestTy())) {
+            bool isFptr = PT->getElementType()->isFunctionTy();
+            Options::HandBlackHole = isFptr;
+        }
         addBlackHoleAddrEdge(dst);
+        Options::HandBlackHole = handleBlk;
     }
     else
     {
@@ -1008,6 +1071,21 @@ const Value* SVFIRBuilder::getBaseValueForExtArg(const Value* V)
         if(totalidx == 0 && !SVFUtil::isa<StructType>(value->getType()))
             value = gep->getPointerOperand();
     }
+    
+    LLVMContext &cxt = LLVMModuleSet::getLLVMModuleSet()->getContext();
+    if (value->getType() == PointerType::getInt8PtrTy(cxt)) {
+        if (const CallBase* cb = SVFUtil::dyn_cast<CallBase>(value)) {
+            if (SVFUtil::isHeapAllocExtCallViaRet(cb)) {
+                if (const Value* bitCast = getUniqueUseViaCastInst(cb))
+                    return bitCast;
+            }
+        }
+        else if (const LoadInst* load = SVFUtil::dyn_cast<LoadInst>(value)) {
+            if (const BitCastInst* bitCast = SVFUtil::dyn_cast<BitCastInst>(load->getPointerOperand()))
+                return bitCast->getOperand(0);
+        }
+    }
+    
     return value;
 }
 
@@ -1019,6 +1097,7 @@ const Type *SVFIRBuilder::getBaseTypeAndFlattenedFields(const Value *V, std::vec
     assert(V);
     const Value* value = getBaseValueForExtArg(V);
     const Type *T = value->getType();
+
     while (const PointerType *ptype = SVFUtil::dyn_cast<PointerType>(T))
         T = getPtrElementType(ptype);
 
@@ -1342,6 +1421,7 @@ void SVFIRBuilder::handleExtCall(CallSite cs, const SVFFunction *callee)
                     }
                     case ExtAPI::EXT_COMPLEX:
                     {
+                        assert(cs.arg_size() == 4 && "_Rb_tree_insert_and_rebalance should have 4 arguments.\n");
                         Value *argA = cs.getArgument(getArgPos(args[0]));
                         Value *argB = cs.getArgument(getArgPos(args[1]));
 
@@ -1353,7 +1433,6 @@ void SVFIRBuilder::handleExtCall(CallSite cs, const SVFFunction *callee)
                         // We get all flattened fields of base
                         vector<LocationSet> fields;
                         const Type *type = getBaseTypeAndFlattenedFields(argB, fields, nullptr);
-                        assert(fields.size() >= 4 && "_Rb_tree_node_base should have at least 4 fields.\n");
 
                         // We summarize the side effects: arg3->parent = arg1, arg3->left = arg1, arg3->right = arg1
                         // Note that arg0 is aligned with "offset".

@@ -259,7 +259,13 @@ bool cppUtil::isLoadVtblInst(const LoadInst *loadInst)
  */
 bool cppUtil::isVirtualCallSite(CallSite cs)
 {
-    // the callsite must be an indirect one with at least one argument (this ptr)
+    // use metadata for indirect call detection instead
+    // metadata is always right, but svf still needs to find the virt-call pattern for its analysis
+    // function may only return true if both SVF + Metadata determine that it is a virtual call
+    bool is_virt_call = cs.getInstruction()->getMetadata("is_icall") == nullptr;
+    if (!is_virt_call)
+        return false;
+
     if (cs.getCalledFunction() != nullptr || cs.arg_empty())
         return false;
 

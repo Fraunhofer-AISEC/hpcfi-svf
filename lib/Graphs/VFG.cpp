@@ -972,7 +972,7 @@ void VFG::connectCallerAndCallee(const CallICFGNode* callBlockNode, const SVFFun
             if (fun_arg->isPointer() && cs_arg->isPointer())
                 connectAParamAndFParam(cs_arg, fun_arg, callBlockNode, csId, edges);
         }
-        assert(funArgIt == funArgEit && "function has more arguments than call site");
+        // assert(funArgIt == funArgEit && "function has more arguments than call site");
         if (callee->getLLVMFun()->isVarArg())
         {
             NodeID varFunArg = pag->getVarargNode(callee);

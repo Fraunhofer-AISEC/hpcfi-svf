@@ -32,7 +32,7 @@ const llvm::cl::opt<NodeIDAllocator::Strategy> Options::NodeAllocStrat(
 
 const llvm::cl::opt<unsigned> Options::MaxFieldLimit(
     "field-limit",
-    llvm::cl::init(512),
+    llvm::cl::init(51200),
     llvm::cl::desc("Maximum number of fields for field sensitive analysis"));
 
 const llvm::cl::opt<BVDataPTAImpl::PTBackingType> Options::ptDataBacking(
@@ -323,7 +323,7 @@ const llvm::cl::opt<bool> Options::PAGPrint(
 
 const llvm::cl::opt<unsigned> Options::IndirectCallLimit(
     "ind-call-limit",
-    llvm::cl::init(50000),
+    llvm::cl::init(5000000),
     llvm::cl::desc("Indirect solved call edge limit")
 );
 
@@ -347,7 +347,7 @@ const llvm::cl::opt<bool> Options::EnableThreadCallGraph(
 
 const llvm::cl::opt<bool> Options::ConnectVCallOnCHA(
     "v-call-cha",
-    llvm::cl::init(false),
+    llvm::cl::init(true),
     llvm::cl::desc("connect virtual calls using cha")
 );
 

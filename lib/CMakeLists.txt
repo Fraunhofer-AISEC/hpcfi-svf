@@ -28,6 +28,10 @@ add_llvm_library(Svf STATIC ${SOURCES} LINK_LIBS Cudd ${Z3_LIBRARIES})
 
 link_directories(${CMAKE_BINARY_DIR}/lib/Cudd)
 
+add_llvm_library(LLVMSvf MODULE BUILDTREE_ONLY ${SOURCES})
+target_link_libraries(LLVMSvf PRIVATE Cudd)
+add_dependencies(LLVMSvf intrinsics_gen)
+add_dependencies(LLVMSvf opt)
 
 if(DEFINED IN_SOURCE_BUILD)
     add_dependencies(Svf intrinsics_gen)

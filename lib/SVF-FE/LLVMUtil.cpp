@@ -311,10 +311,12 @@ const Value* LLVMUtil::getUniqueUseViaCastInst(const Value* val)
     /// If type is void* (i8*) and val is only used at a bitcast instruction
     if (IntegerType *IT = SVFUtil::dyn_cast<IntegerType>(getPtrElementType(type)))
     {
-        if (IT->getBitWidth() == 8 && val->getNumUses()==1)
+        if (IT->getBitWidth() == 8)
         {
-            const Use *u = &*val->use_begin();
-            return SVFUtil::dyn_cast<BitCastInst>(u->getUser());
+            for (const User* user: val->users()) {
+                if (const BitCastInst* bitCast = SVFUtil::dyn_cast<BitCastInst>(user))
+                    return bitCast;
+            }
         }
     }
     return nullptr;

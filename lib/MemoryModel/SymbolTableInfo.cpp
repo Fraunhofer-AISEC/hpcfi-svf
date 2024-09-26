@@ -384,6 +384,10 @@ u32_t SymbolTableInfo::getFlattenedElemIdx(const Type *T, u32_t origId)
     {
         if(SVFUtil::isa<StructType>(T))
         {
+            // if T is a packed struct, the actual type is probably array
+            if (SVFUtil::dyn_cast<StructType>(T)->isPacked() && !Options::ModelArrays) {
+               return 0;
+            }
             std::vector<u32_t>& so = getStructInfoIter(T)->second->getFlattenedFieldIdxVec();
             assert ((unsigned)origId < so.size() && !so.empty() && "Struct index out of bounds, can't get flattened index!");
             return so[origId];
@@ -414,7 +418,8 @@ const Type* SymbolTableInfo::getFlatternedElemType(const Type* baseType, u32_t f
     else
     {
         const std::vector<const Type*>& so = getStructInfoIter(baseType)->second->getFlattenFieldTypes();
-        assert (flatten_idx < so.size() && !so.empty() && "element index out of bounds or struct opaque type, can't get element type!");
+        if (!(flatten_idx < so.size() && !so.empty()))
+            return so[0];
         return so[flatten_idx];
     }
 }

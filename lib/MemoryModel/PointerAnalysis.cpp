@@ -425,7 +425,7 @@ void PointerAnalysis::resolveIndCalls(const CallICFGNode* cs, const PointsTo& ta
 
                 /// if the arg size does not match then we do not need to connect this parameter
                 /// even if the callee is a variadic function (the first parameter of variadic function is its paramter number)
-                if(matchArgs(cs, callee) == false)
+                if(matchArgs(cs, callee) == false && !callee->isVarArg())
                     continue;
 
                 if(0 == getIndCallMap()[cs].count(callee))
